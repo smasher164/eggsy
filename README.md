@@ -2,11 +2,14 @@
 
 eggsy's goal is to execute a set of source files in a sandboxed docker container, i.e. it's job is to execute with gVisor (Dockerfile, file set, command, timeout).
 
+
 The FileSet just has to be a list of paths and their io.ReadCloser's. It is copied into the container along with the provided Dockerfile.
+
 
 Execute means that after the Dockerfile is run, the provided shell command is executed with a user-defined timeout.
 
-The Sandbox is [gVisor](https://github.com/google/gvisor), intended to isolate a process in a container from the host's kernel.
+
+The Sandbox is [gVisor](https://github.com/google/gvisor), a user-space kernel intended to isolate a process in a container from the host's kernel.
 
 Example:
 ```Go
