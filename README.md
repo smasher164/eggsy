@@ -1,7 +1,9 @@
 # eggsy
 
-eggsy's goal is to execute a set of source files in a sandboxed docker container, i.e. it's job is to execute with gVisor (Dockerfile, file set, command, timeout).
-
+eggsy's goal is to execute a set of source files in a sandboxed container, i.e. it's job is effectively to
+```
+execute_with_gvisor(dockerfile, file set, command, timeout)
+```
 
 The FileSet just has to be a list of paths and their io.ReadCloser's. It is copied into the container along with the provided Dockerfile.
 
@@ -72,9 +74,9 @@ func main() {
 }
 
 ```
-which should output the message similar to the following:
+which should output a message similar to the following:
 ```
 2018/08/14 23:42:15 process "go run somefile.go" in container eb06ed18d403e87e28382a8867e44b7a from image 98897596d97f38af229c2847c6287079 has timed out
 ```
 
-Further work is required to programmatically configure access to the network and certain system calls.
+Further work is required to programmatically configure access to both the network and certain system calls.
