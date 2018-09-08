@@ -2,13 +2,13 @@
 
 eggsy's goal is to execute a set of source files in a sandboxed container, i.e. it's job is effectively to
 ```
-execute_with_gvisor(dockerfile, file set, command, timeout)
+execute_with_gvisor(dockerfile, file set, command, timeout, seccomp)
 ```
 
 The FileSet just has to be a list of paths and their io.ReadCloser's. It is copied into the container along with the provided Dockerfile.
 
 
-Execute means that after the Dockerfile is run, the provided shell command is executed with a user-defined timeout.
+Execute means that after the Dockerfile is run, the provided shell command is executed with a user-defined timeout. The executor also takes in an optional seccomp security profile and flag to configure network access.
 
 
 The Sandbox is [gVisor](https://github.com/google/gvisor), a user-space kernel intended to isolate a process in a container from the host's kernel.
@@ -63,6 +63,8 @@ func main() {
         Files:      files,
         Cmd:        cmd,
         Timeout:    3 * time.Second,
+        Seccomp:    eggsy.SEDefault,
+        Net:        eggsy.NetBridge,
         Stdout:     os.Stdout,
         Stderr:     os.Stderr,
     }
@@ -78,5 +80,3 @@ which should output a message similar to the following:
 ```
 2018/08/14 23:42:15 process "go run somefile.go" in container eb06ed18d403e87e28382a8867e44b7a from image 98897596d97f38af229c2847c6287079 has timed out
 ```
-
-Further work is required to programmatically configure access to both the network and certain system calls.

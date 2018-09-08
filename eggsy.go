@@ -33,6 +33,7 @@ import (
 	"io/ioutil"
 	"path/filepath"
 	"strconv"
+	"sync"
 	"time"
 
 	"github.com/docker/docker/api/types"
@@ -43,29 +44,107 @@ import (
 	"github.com/docker/docker/pkg/stdcopy"
 )
 
-type File struct {
-	Path string
-	io.ReadCloser
+type (
+	// SEProfile is a json Seccomp security profile used to
+	// constrain system calls to the Linux kernel.
+	SEProfile string
+
+	// Network is a network mode for a container. See the
+	// constant definitions for descriptions of valid network modes.
+	Network int
+
+	// TimeoutError represents an error with a container
+	// finishing its command execution, given its timeout.
+	TimeoutError string
+
+	// File associates a path with readable data, used in a FileSet
+	// to create a build context for a container environment.
+	File struct {
+		Path string
+		io.ReadCloser
+	}
+
+	// FileSet is a list of files used to create a build context
+	// for a container environment.
+	FileSet interface {
+		At(i int) (File, error)
+		Len() int
+	}
+
+	// Executor represents a non-reusable sandbox for executing a command.
+	Executor struct {
+		// Dockerfile is the Dockerfile used to construct the container.
+		Dockerfile []byte
+
+		// Files holds the set of files to be transferred into the build context.
+		Files FileSet
+
+		// Cmd is the shell command to execute inside the container.
+		Cmd string
+
+		// Timeout represents the timeout for the container to exit after
+		// it has been spawned. A Timeout < 0 means there is no timeout.
+		// If the timeout is reached before the container exits on its own,
+		// Execute will return a TimeoutError.
+		Timeout time.Duration
+
+		// Seccomp is the security profile used to constrain system calls made
+		// from the container. The default profile is provided by docker.
+		Seccomp SEProfile
+
+		// Net is the network mode for the container. The default mode
+		// is a bridge network.
+		Net Network
+
+		// Stdout and Stderr specify the container's standard output and standard error.
+		//
+		// If either is nil, output will be written to the null device.
+		//
+		// If Stdout == Stderr, at most one goroutine at a time will call Write.
+		Stdout io.Writer
+		Stderr io.Writer
+
+		cli   *client.Client
+		spath string
+	}
+)
+
+type syncWriter struct {
+	m sync.Mutex
+	w io.Writer
 }
 
-type FileSet interface {
-	At(i int) (File, error)
-	Len() int
+func (s *syncWriter) Write(p []byte) (n int, err error) {
+	s.m.Lock()
+	defer s.m.Unlock()
+	n, err = s.w.Write(p)
+	return
 }
 
-type Executor struct {
-	Dockerfile []byte
-	Files      FileSet
-	Cmd        string
-	Timeout    time.Duration
+const (
+	NoTimeout time.Duration = -1
 
-	Stdout io.Writer
-	Stderr io.Writer
+	SEDefault    SEProfile = ""
+	SEUnconfined SEProfile = "unconfined"
 
-	cli *client.Client
+	// NetBridge is the default network mode. No ports are exposed to the
+	// outside world and other containers are only accessible via IP.
+	NetBridge Network = 0
+
+	// NetNone disables all network access in the container except to localhost.
+	NetNone Network = 1
+)
+
+func (n Network) mode() container.NetworkMode {
+	switch n {
+	case 0:
+		return "bridge"
+	case 1:
+		return "none"
+	default:
+		panic(fmt.Sprintf("(%v) doesn't have a corresponding network mode", n))
+	}
 }
-
-type TimeoutError string
 
 func (t TimeoutError) Error() string { return string(t) }
 
@@ -101,6 +180,19 @@ func (e *Executor) makeBuildContext() (io.Reader, error) {
 		Size: int64(len(e.Dockerfile)),
 	})
 	tw.Write(e.Dockerfile)
+	if e.Seccomp != SEDefault && e.Seccomp != SEUnconfined {
+		sc := []byte(e.Seccomp)
+		e.spath = randN(8) + ".json"
+		tw.WriteHeader(&tar.Header{
+			Name: e.spath,
+			Mode: 0666,
+			Size: int64(len(sc)),
+		})
+		tw.Write(sc)
+	}
+	if e.Seccomp == SEUnconfined {
+		e.spath = "unconfined.json"
+	}
 	if err := tw.Close(); err != nil {
 		return nil, err
 	}
@@ -113,12 +205,18 @@ func randN(n int) string {
 	return hex.EncodeToString(b)
 }
 
-var runtime string
-
 func (e *Executor) runContainer(ctx context.Context, tag, cID string) (err error) {
 	t := int(e.Timeout.Seconds())
 	if e.Timeout < 0 {
 		t = -1
+	}
+	// gvisor
+	hc := &container.HostConfig{
+		NetworkMode: e.Net.mode(),
+		Runtime:     "runsc",
+	}
+	if e.Seccomp != SEDefault {
+		hc.SecurityOpt = []string{"seccomp=" + e.spath}
 	}
 	_, err = e.cli.ContainerCreate(
 		ctx, &container.Config{
@@ -128,11 +226,7 @@ func (e *Executor) runContainer(ctx context.Context, tag, cID string) (err error
 			Cmd:         strslice.StrSlice{"sh", "-c", fmt.Sprintf("\"%q\"", e.Cmd)},
 			Image:       tag,
 			StopTimeout: &t,
-		},
-		&container.HostConfig{
-			// "runsc" for gvisor
-			Runtime: runtime,
-		}, nil, cID)
+		}, hc, nil, cID)
 	if err != nil {
 		return err
 	}
@@ -150,10 +244,24 @@ func (e *Executor) runContainer(ctx context.Context, tag, cID string) (err error
 	if err != nil {
 		return err
 	}
+	if e.Stdout == nil {
+		e.Stdout = ioutil.Discard
+	}
+	if e.Stderr == nil {
+		e.Stderr = ioutil.Discard
+	}
+	if e.Stdout == e.Stderr {
+		e.Stdout = &syncWriter{w: e.Stdout}
+		e.Stderr = e.Stdout
+	}
 	go stdcopy.StdCopy(e.Stdout, e.Stderr, muxRC)
 	return nil
 }
 
+// Execute takes in a context, executes the Executor's command
+// in a container, and waits for the container to exit. The timeout
+// of the provided context is different from the timeout of the
+// container. Execute will return a TimeoutError on a container timeout.
 func (e *Executor) Execute(ctx context.Context) (err error) {
 	bc, err := e.makeBuildContext()
 	if err != nil {
