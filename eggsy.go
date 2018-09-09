@@ -45,10 +45,6 @@ import (
 )
 
 type (
-	// SEProfile is a json Seccomp security profile used to
-	// constrain system calls to the Linux kernel.
-	SEProfile string
-
 	// Network is a network mode for a container. See the
 	// constant definitions for descriptions of valid network modes.
 	Network int
@@ -89,8 +85,9 @@ type (
 		Timeout time.Duration
 
 		// Seccomp is the security profile used to constrain system calls made
-		// from the container. The default profile is provided by docker.
-		Seccomp SEProfile
+		// from the container to the Linux kernel. The default profile is
+		// provided by docker.
+		Seccomp string
 
 		// Net is the network mode for the container. The default mode
 		// is a bridge network.
@@ -124,8 +121,8 @@ func (s *syncWriter) Write(p []byte) (n int, err error) {
 const (
 	NoTimeout time.Duration = -1
 
-	SEDefault    SEProfile = ""
-	SEUnconfined SEProfile = "unconfined"
+	SEDefault    = ""
+	SEUnconfined = "unconfined"
 
 	// NetBridge is the default network mode. No ports are exposed to the
 	// outside world and other containers are only accessible via IP.
