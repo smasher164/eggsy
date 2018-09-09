@@ -74,7 +74,7 @@ type (
 	// Executor represents a non-reusable sandbox for executing a command.
 	Executor struct {
 		// Dockerfile is the Dockerfile used to construct the container.
-		Dockerfile []byte
+		Dockerfile string
 
 		// Files holds the set of files to be transferred into the build context.
 		Files FileSet
@@ -179,16 +179,15 @@ func (e *Executor) makeBuildContext() (io.Reader, error) {
 		Mode: 0666,
 		Size: int64(len(e.Dockerfile)),
 	})
-	tw.Write(e.Dockerfile)
+	tw.Write([]byte(e.Dockerfile))
 	if e.Seccomp != SEDefault && e.Seccomp != SEUnconfined {
-		sc := []byte(e.Seccomp)
 		e.spath = randN(8) + ".json"
 		tw.WriteHeader(&tar.Header{
 			Name: e.spath,
 			Mode: 0666,
-			Size: int64(len(sc)),
+			Size: int64(len(e.Seccomp)),
 		})
-		tw.Write(sc)
+		tw.Write([]byte(e.Seccomp))
 	}
 	if e.Seccomp == SEUnconfined {
 		e.spath = "unconfined.json"

@@ -59,7 +59,7 @@ func main() {
     }}
 
     e := &eggsy.Executor{
-        Dockerfile: []byte(dockerfile),
+        Dockerfile: dockerfile,
         Files:      files,
         Cmd:        cmd,
         Timeout:    3 * time.Second,
