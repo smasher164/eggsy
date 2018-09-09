@@ -2,7 +2,7 @@
 
 eggsy's goal is to execute a set of source files in a sandboxed container, i.e. it's job is effectively to
 ```
-execute_with_gvisor(dockerfile, file set, command, timeout, seccomp)
+execute_with_gvisor(dockerfile, file set, command, timeout, seccomp, network mode)
 ```
 
 The FileSet just has to be a list of paths and their io.ReadCloser's. It is copied into the container along with the provided Dockerfile.
